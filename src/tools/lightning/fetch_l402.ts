@@ -94,6 +94,11 @@ async function fetchWithL402(
 
   const headers = new Headers(requestOptions.headers ?? undefined);
   headers.set("X-Payment-Hash", paymentHash);
+  // Some servers retry using `Authorization: L402 <payment_hash>` instead of `X-Payment-Hash`.
+  // Only set this if the caller didn't already supply Authorization.
+  if (!headers.has("Authorization")) {
+    headers.set("Authorization", `L402 ${paymentHash}`);
+  }
 
   // Note: body is a string in this tool; safe to retry.
   const retry: RequestInit = {
