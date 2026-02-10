@@ -28,6 +28,16 @@ function parseWwwAuthenticateForInvoice(header: string | null): string | null {
   return normalizeMaybeString(m?.[1]);
 }
 
+function withPaymentHashQueryParam(url: string, paymentHash: string): string {
+  const u = new URL(url);
+  // Many L402-ish APIs accept the payment hash via query string.
+  // This also avoids conflicts when the caller already uses `Authorization: Bearer ...`.
+  if (!u.searchParams.has("payment_hash")) {
+    u.searchParams.set("payment_hash", paymentHash);
+  }
+  return u.toString();
+}
+
 async function isPaymentPending(res: Response): Promise<boolean> {
   if (res.status !== 402) return false;
 
@@ -102,6 +112,8 @@ async function fetchWithL402(
 
   await provider.sendPayment(invoice);
 
+  const retryUrl = withPaymentHashQueryParam(url, paymentHash);
+
   const headers = new Headers(requestOptions.headers ?? undefined);
   headers.set("X-Payment-Hash", paymentHash);
   // Some servers retry using `Authorization: L402 <payment_hash>` instead of `X-Payment-Hash`.
@@ -122,13 +134,13 @@ async function fetchWithL402(
   let last: Response | null = null;
   for (const delay of backoffsMs) {
     if (delay > 0) await sleep(delay);
-    const res = await fetch(url, retry);
+    const res = await fetch(retryUrl, retry);
     last = res;
     if (res.status !== 402) return res;
     if (!(await isPaymentPending(res))) return res;
   }
 
-  return last ?? (await fetch(url, retry));
+  return last ?? (await fetch(retryUrl, retry));
 }
 
 export function registerFetchL402Tool(
