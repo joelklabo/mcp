@@ -7,6 +7,16 @@ type L402Challenge = {
   payment_hash?: string;
 };
 
+function normalizeMaybeString(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const s = v.trim();
+  if (!s) return null;
+  const lowered = s.toLowerCase();
+  // Guard against the common bug where `undefined` gets stringified into JSON.
+  if (lowered === "undefined" || lowered === "null") return null;
+  return s;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -15,7 +25,7 @@ function parseWwwAuthenticateForInvoice(header: string | null): string | null {
   if (!header) return null;
   // Example: `L402 invoice="lnbc...", macaroon="none"`
   const m = header.match(/(?:^|,)\s*invoice="([^"]+)"/i);
-  return m?.[1] ?? null;
+  return normalizeMaybeString(m?.[1]);
 }
 
 async function isPaymentPending(res: Response): Promise<boolean> {
@@ -56,8 +66,8 @@ async function extractL402Challenge(res: Response): Promise<{
 
   try {
     const parsed = JSON.parse(bodyText) as L402Challenge;
-    if (typeof parsed?.invoice === "string") invoice = parsed.invoice;
-    if (typeof parsed?.payment_hash === "string") paymentHash = parsed.payment_hash;
+    invoice = normalizeMaybeString(parsed?.invoice);
+    paymentHash = normalizeMaybeString(parsed?.payment_hash);
   } catch {
     // Not JSON, fall back to headers below.
   }
