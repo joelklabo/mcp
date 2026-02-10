@@ -32,9 +32,8 @@ function withPaymentHashQueryParam(url: string, paymentHash: string): string {
   const u = new URL(url);
   // Many L402-ish APIs accept the payment hash via query string.
   // This also avoids conflicts when the caller already uses `Authorization: Bearer ...`.
-  if (!u.searchParams.has("payment_hash")) {
-    u.searchParams.set("payment_hash", paymentHash);
-  }
+  // Always overwrite any existing payment_hash (it may be empty/"undefined" from a caller's initial request).
+  u.searchParams.set("payment_hash", paymentHash);
   return u.toString();
 }
 
