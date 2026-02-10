@@ -7,11 +7,41 @@ type L402Challenge = {
   payment_hash?: string;
 };
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function parseWwwAuthenticateForInvoice(header: string | null): string | null {
   if (!header) return null;
   // Example: `L402 invoice="lnbc...", macaroon="none"`
   const m = header.match(/(?:^|,)\s*invoice="([^"]+)"/i);
   return m?.[1] ?? null;
+}
+
+async function isPaymentPending(res: Response): Promise<boolean> {
+  if (res.status !== 402) return false;
+
+  // The inspector error we've seen is:
+  // {"error":"payment not found or not yet confirmed","payment_hash":"..."}
+  // Use a cloned response so callers can still read the real body.
+  const bodyText = await res.clone().text();
+
+  try {
+    const parsed = JSON.parse(bodyText) as { error?: unknown };
+    if (typeof parsed?.error === "string") {
+      const msg = parsed.error.toLowerCase();
+      return (
+        msg.includes("not yet confirmed") ||
+        msg.includes("payment not found") ||
+        msg.includes("payment not yet confirmed")
+      );
+    }
+  } catch {
+    // Ignore: body might not be JSON.
+  }
+
+  const lowered = bodyText.toLowerCase();
+  return lowered.includes("not yet confirmed") || lowered.includes("payment not found");
 }
 
 async function extractL402Challenge(res: Response): Promise<{
@@ -71,7 +101,19 @@ async function fetchWithL402(
     headers,
   };
 
-  return fetch(url, retry);
+  // Some services take a short moment to confirm the payment after WebLN returns.
+  // If we retry too quickly, we can get a second 402 with "payment not found or not yet confirmed".
+  const backoffsMs = [0, 250, 750, 1500];
+  let last: Response | null = null;
+  for (const delay of backoffsMs) {
+    if (delay > 0) await sleep(delay);
+    const res = await fetch(url, retry);
+    last = res;
+    if (res.status !== 402) return res;
+    if (!(await isPaymentPending(res))) return res;
+  }
+
+  return last ?? (await fetch(url, retry));
 }
 
 export function registerFetchL402Tool(
