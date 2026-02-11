@@ -1,3 +1,4 @@
+import { Invoice } from "@getalby/lightning-tools";
 import { webln } from "@getalby/sdk";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -102,23 +103,32 @@ async function fetchWithL402(
       `L402 challenge missing invoice. status=${first.status} body=${bodyText}`
     );
   }
-  if (!paymentHash) {
-    // Avoid sending "undefined" as payment hash; fail loudly so integrators can fix the server response.
+  const inferredPaymentHash = (() => {
+    if (paymentHash) return paymentHash;
+    try {
+      // Many servers forget to include `payment_hash` (or accidentally stringify undefined).
+      // We can still derive it deterministically from the invoice.
+      return normalizeMaybeString(new Invoice({ pr: invoice }).paymentHash);
+    } catch {
+      return null;
+    }
+  })();
+  if (!inferredPaymentHash) {
     throw new Error(
-      `L402 challenge missing payment_hash. status=${first.status} body=${bodyText}`
+      `L402 challenge missing payment_hash (and couldn't infer from invoice). status=${first.status} body=${bodyText}`
     );
   }
 
   await provider.sendPayment(invoice);
 
-  const retryUrl = withPaymentHashQueryParam(url, paymentHash);
+  const retryUrl = withPaymentHashQueryParam(url, inferredPaymentHash);
 
   const headers = new Headers(requestOptions.headers ?? undefined);
-  headers.set("X-Payment-Hash", paymentHash);
+  headers.set("X-Payment-Hash", inferredPaymentHash);
   // Some servers retry using `Authorization: L402 <payment_hash>` instead of `X-Payment-Hash`.
   // Only set this if the caller didn't already supply Authorization.
   if (!headers.has("Authorization")) {
-    headers.set("Authorization", `L402 ${paymentHash}`);
+    headers.set("Authorization", `L402 ${inferredPaymentHash}`);
   }
 
   // Note: body is a string in this tool; safe to retry.
