@@ -8,6 +8,12 @@ type L402Challenge = {
   payment_hash?: string;
 };
 
+function maskHash(hash: string): string {
+  const s = hash.trim();
+  if (s.length <= 16) return s;
+  return `${s.slice(0, 8)}...${s.slice(-8)}`;
+}
+
 function normalizeMaybeString(v: unknown): string | null {
   if (typeof v !== "string") return null;
   const s = v.trim();
@@ -122,6 +128,19 @@ async function fetchWithL402(
   await provider.sendPayment(invoice);
 
   const retryUrl = withPaymentHashQueryParam(url, inferredPaymentHash);
+  // Keep this log stable and low-noise; it's valuable when debugging inspector failures.
+  try {
+    const u = new URL(retryUrl);
+    console.error("L402 retry prepared", {
+      url: u.origin + u.pathname,
+      method: requestOptions.method ?? "GET",
+      retry_payment_hash: maskHash(u.searchParams.get("payment_hash") ?? ""),
+      inferred_payment_hash: maskHash(inferredPaymentHash),
+      challenge_payment_hash_present: Boolean(paymentHash),
+    });
+  } catch {
+    // Ignore logging errors
+  }
 
   const headers = new Headers(requestOptions.headers ?? undefined);
   headers.set("X-Payment-Hash", inferredPaymentHash);
